@@ -43,6 +43,25 @@ defmodule A do
 
   def replica(n), do: :erpc.call(n, Process, :whereis, [Crdt.Replica])
 
+  # the read APIs besides text (status / history), as each one names them
+  def read_extra(n) do
+    case kind(n) do
+      :ours -> {:erpc.call(n, Doc, :status, []), :erpc.call(n, Doc, :history, [])}
+      :carla -> {:erpc.call(n, CpdDoc, :estado, []), :erpc.call(n, CpdDoc, :historial, [])}
+      _ -> {:erpc.call(n, Crdt, :status, []), :erpc.call(n, Crdt, :history, [])}
+    end
+  end
+
+  def safe(f) do
+    {:ok, f.()}
+  catch
+    k, e -> {:raised, k, e |> inspect(limit: 3) |> String.slice(0, 90)}
+  end
+
+  # reference model of the visible text (graphemes)
+  def m_ins(s, i, w), do: String.slice(s, 0, i) <> w <> String.slice(s, i..-1//1)
+  def m_del(s, i, c), do: String.slice(s, 0, i) <> String.slice(s, (i + c)..-1//1)
+
   # ---- topology --------------------------------------------------------------
   def mesh(ns), do: for(a <- ns, b <- ns, a < b, do: :erpc.call(a, Node, :connect, [b]))
   def cut(as, bs), do: for(a <- as, b <- bs, a != b, do: :erpc.call(a, :erlang, :disconnect_node, [b]))
@@ -273,6 +292,159 @@ for {n, k} <- Enum.with_index(first) do
 end
 t = A.converge(all, "fake ops held, applied once, forwarded to all")
 A.ok(t != nil and length(String.split(t, "xyz")) - 1 == 4, "\"xyz\" exactly 4 times (one per implementation that received it)")
+
+
+A.title("C1 CREATE from each implementation: empty document, start, middle, end (exact text)")
+base = A.text(hd(all))
+t0 = A.now()
+r = A.safe(fn -> A.delete(Enum.at(all, 5), 0, String.length(base)) end)
+emptied = A.converge(all, "treedoc2 deletes the whole document (#{String.length(base)} chars) in one call", 180_000)
+dt = A.now() - t0
+
+case r do
+  {:ok, _} -> A.note("treedoc deleted #{String.length(base)} chars in one call; everyone empty after #{dt} ms")
+  {:raised, _, e} -> A.note("treedoc's own call gave up (#{String.slice(e, 0, 60)}), but the replica kept going: everyone empty after #{dt} ms")
+end
+
+A.ok(emptied == "", "document is empty everywhere")
+expect = ""
+
+expect =
+  Enum.reduce(first, expect, fn n, exp ->
+    k = A.kind(n)
+
+    exp =
+      Enum.reduce([{:start, "S-#{k} "}, {:end, " E-#{k}"}, {:middle, "[M-#{k}]"}], exp, fn {where, w}, exp ->
+        i = %{start: 0, end: String.length(exp), middle: div(String.length(exp), 2)}[where]
+        A.insert(n, i, w)
+        t = A.converge(all, "#{k} creates at #{where}")
+        exp = A.m_ins(exp, i, w)
+        A.ok(t == exp, "#{k} create at #{where}: exact text")
+        exp
+      end)
+
+    exp
+  end)
+
+A.title("C2 READ on every node: same text, same length in graphemes, same char at every 7th position, status/history APIs")
+ts = Enum.map(all, &A.text/1)
+A.ok(Enum.uniq(ts) == [expect], "all 8 read exactly the expected document")
+A.ok(ts |> Enum.map(&String.length/1) |> Enum.uniq() == [String.length(expect)], "same length (#{String.length(expect)} graphemes) everywhere")
+A.ok(Enum.all?(ts, fn t -> Enum.all?(0..(String.length(expect) - 1)//7, &(String.at(t, &1) == String.at(expect, &1))) end), "same grapheme at every sampled position")
+for n <- first do
+  case A.safe(fn -> A.read_extra(n) end) do
+    {:ok, _} -> A.ok(A.replica(n) != nil, "#{A.kind(n)} status and history read without error")
+    other -> A.ok(false, "#{A.kind(n)} status/history raised: #{inspect(other)}")
+  end
+end
+
+A.title("C3 UPDATE (= delete the range + insert the new text) from each implementation, exact text")
+_ =
+  Enum.reduce(first, expect, fn n, exp ->
+    k = A.kind(n)
+    old = "S-#{k} "
+    i = :binary.match(exp, old) |> elem(0) |> then(&String.length(binary_part(exp, 0, &1)))
+    new = "U-#{k}~ñ "
+    A.delete(n, i, String.length(old))
+    A.insert(n, i, new)
+    t = A.converge(all, "#{k} replaces #{inspect(old)} with #{inspect(new)}")
+    exp = exp |> A.m_del(i, String.length(old)) |> A.m_ins(i, new)
+    A.ok(t == exp, "#{k} update: exact text")
+    exp
+  end)
+
+for {a, b} <- [{Enum.at(first, 0), Enum.at(first, 1)}, {Enum.at(first, 2), Enum.at(first, 3)}, {Enum.at(second, 0), Enum.at(second, 3)}] do
+  A.insert(a, 0, "gato ")
+  A.converge(all, "word to fight over")
+  A.isolate(all)
+  # both replace the SAME word at the same time, without seeing each other
+  A.par([
+    fn -> A.delete(a, 0, 5); A.insert(a, 0, "perro ") end,
+    fn -> A.delete(b, 0, 5); A.insert(b, 0, "loro ") end
+  ])
+  A.mesh(all)
+  t = A.converge(all, "concurrent update #{A.kind(a)} vs #{A.kind(b)}")
+  A.ok(t != nil and not String.contains?(t, "gato") and A.whole?(t, "perro ") and A.whole?(t, "loro "),
+    "concurrent update #{A.kind(a)}/#{A.kind(b)}: old word gone once, both new words whole (#{inspect(String.slice(t || "", 0, 12))})")
+  t = A.text(hd(all))
+  w = String.slice(t, 0, String.length("perro loro "))
+  A.delete(a, 0, String.length(w))
+  A.converge(all, "cleanup")
+end
+expect = A.text(hd(all))
+
+A.title("C4 DELETE from each implementation: first, last, a middle range, then everything (exact text)")
+_ =
+  Enum.reduce(first, expect, fn n, exp ->
+    k = A.kind(n)
+
+    Enum.reduce([{"first char", fn e -> {0, 1, e} end}, {"last char", fn e -> {String.length(e) - 1, 1, e} end},
+                 {"range of 5 in the middle", fn e -> {div(String.length(e), 2), 5, e} end}], exp, fn {label, f}, exp ->
+      {i, c, _} = f.(exp)
+      A.delete(n, i, c)
+      t = A.converge(all, "#{k} deletes #{label}")
+      exp = A.m_del(exp, i, c)
+      A.ok(t == exp, "#{k} delete #{label}: exact text")
+      exp
+    end)
+  end)
+
+for n <- first do
+  A.insert(n, 0, "temporal-#{A.kind(n)}")
+  A.converge(all, "text to wipe")
+  len = String.length(A.text(n))
+  A.delete(n, 0, len)
+  A.ok(A.converge(all, "#{A.kind(n)} deletes everything (#{len} chars) in one call") == "", "#{A.kind(n)} delete all: empty everywhere")
+  A.insert(n, 0, "otra vez")
+  A.ok(A.converge(all, "#{A.kind(n)} creates on the emptied document") == "otra vez", "#{A.kind(n)} create after delete-all")
+  A.delete(n, 0, 8)
+  A.converge(all, "empty again")
+end
+A.insert(Enum.at(first, 3), 0, "Documento final de CRUD")
+expect = A.converge(all, "a document for C5")
+
+A.title("C5 invalid CRUD calls on each implementation: must not change any document or crash")
+bad_calls = fn len ->
+  [
+    {"insert past the end", &A.insert(&1, len + 1, "x")},
+    {"insert at -1", &A.insert(&1, -1, "x")},
+    {"insert at a float index", &A.insert(&1, 1.5, "x")},
+    {"insert a non-binary", &A.insert(&1, 0, :x)},
+    {"insert invalid UTF-8", &A.insert(&1, 0, <<255>>)},
+    {"insert empty text", &A.insert(&1, 0, "")},
+    {"delete past the end", &A.delete(&1, len, 1)},
+    {"delete at -1", &A.delete(&1, -1, 1)},
+    {"delete more than there is", &A.delete(&1, 0, len + 1)},
+    {"delete 0 chars", &A.delete(&1, 0, 0)},
+    {"delete -1 chars", &A.delete(&1, 0, -1)},
+    {"delete at an atom index", &A.delete(&1, :a, 1)}
+  ]
+end
+
+for n <- first do
+  len = String.length(expect)
+
+  for {label, f} <- bad_calls.(len) do
+    pid = A.replica(n)
+    r = A.safe(fn -> f.(n) end)
+    Process.sleep(150)
+    shown = case r do {:ok, v} -> "returns #{inspect(v)}"; {:raised, _, e} -> "raises #{e}" end
+    same? = A.text(n) == expect
+
+    if A.replica(n) == pid and same?,
+      do: A.ok(true, "#{A.kind(n)} #{label}: rejected, nothing changed (#{shown})"),
+      else: A.ok(false, "#{A.kind(n)} #{label}: #{if A.replica(n) != pid, do: "REPLICA CRASHED", else: "DOCUMENT CHANGED to #{inspect(A.text(n))}"} (#{shown})")
+
+    if A.replica(n) != pid do
+      # wait for the restart and let the supervisor's restart window pass
+      Enum.find_value(1..50, fn _ -> Process.sleep(100); A.replica(n) end)
+      Process.sleep(5_500)
+      A.converge(all, "#{A.kind(n)} back after the crash")
+    end
+  end
+end
+t = A.converge(all, "after all invalid calls")
+A.ok(t == expect, "no invalid call changed any document")
 
 A.title("E14 connections stay up while idle (net_ticktime equal everywhere), 25 s")
 Process.sleep(25_000)
