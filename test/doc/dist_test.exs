@@ -63,4 +63,17 @@ defmodule Doc.DistTest do
     {us, []} = call(a, :timer, :tc, [Doc.Discovery, :nodes_at, [{192, 0, 2, 1}, 1_000]])
     assert us < 2_000_000
   end
+
+  test "stays connected while idle to a node with the default net_ticktime (regression)" do
+    # Doc.Dist used net_ticktime 10; the other groups use Erlang's 60 (a tick
+    # every 15 s), so ours cut them ~12 s after connecting: "not responding"
+    a = start_bare("pi-a", tmp())
+    {other, nb} = Doc.PeerHelper.start(:"default#{System.unique_integer([:positive])}", false)
+    on_exit(fn -> :peer.stop(other) end)
+
+    assert call(a, :net_kernel, :get_net_ticktime) == call(other, :net_kernel, :get_net_ticktime)
+    assert call(a, Node, :connect, [nb])
+    Process.sleep(20_000)
+    assert nb in call(a, Node, :list), "the connection dropped while idle"
+  end
 end

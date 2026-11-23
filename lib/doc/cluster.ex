@@ -43,7 +43,10 @@ defmodule Doc.Dist do
 
   Ports (the contract, INTEGRATION.md L1): the distribution listens in
   4218–4228 (`:dist_ports`), so a firewall rule for that range is enough.
-  `net_ticktime` 10 s so a Pi that leaves is detected quickly.
+  `net_ticktime` is Erlang's default (60 s), NOT shorter: it must be the same
+  on every node. With 10 s here and 60 s on the other groups' nodes (they send
+  a tick every 15 s), this node declared them "not responding" and cut the
+  connection about 12 s after connecting (reported by another group).
   """
   use GenServer
   require Logger
@@ -101,7 +104,7 @@ defmodule Doc.Dist do
         Application.put_env(:kernel, :inet_dist_listen_min, lo)
         Application.put_env(:kernel, :inet_dist_listen_max, hi)
 
-        case :net_kernel.start(name, %{name_domain: :longnames, net_ticktime: 10}) do
+        case :net_kernel.start(name, %{name_domain: :longnames}) do
           {:ok, _} -> true
           {:error, {:already_started, _}} -> false
           {:error, reason} -> exit({:dist_start_failed, name, reason})
