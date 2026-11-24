@@ -11,9 +11,13 @@ El plan, con las decisiones, los papers y la tabla de pruebas, está en `../../p
 ## Uso rápido (IEx, o `ssh` a la Pi)
 
 ```elixir
-Doc.insert(0, "Hola mundo")    # inserta en el índice visible
-Doc.delete(4, 6)               # borra 6 caracteres desde el índice 4
-Doc.text()                     # el documento (igual en todos los nodos)
+# CRUD (cada llamada devuelve :ok, el texto o {:error, motivo}; con error no cambia nada)
+Doc.insert(0, "Hola mundo")    # Create: inserta en el índice visible
+Doc.append("fin\n")            # Create: inserta al final
+Doc.text()                     # Read: el documento (igual en todos los nodos)
+Doc.read(0, 4)                 # Read: 4 caracteres desde el índice 0 -> "Hola"
+Doc.replace(5, 5, "gente")     # Update: los 5 caracteres desde el 5 pasan a ser "gente", en UNA llamada
+Doc.delete(4, 6)               # Delete: borra 6 caracteres desde el índice 4
 Doc.status()                   # reloj vectorial, operaciones en espera, pares, contadores
 Doc.debug()                    # cada átomo con su PosID y si es tombstone
 Doc.history()                  # todas las operaciones aplicadas, en orden

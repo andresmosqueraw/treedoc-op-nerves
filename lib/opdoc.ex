@@ -3,9 +3,20 @@ defmodule Doc do
   Distributed document without a central server (ISIS-4218 CPD, p_dist).
   IEx interface (over `ssh` on the Pi):
 
-      Doc.insert(0, "Hola mundo")    # insert at visible index
-      Doc.delete(4, 6)               # delete 6 chars from index 4
-      Doc.text()                     # the whole document (same on every node)
+  CRUD:
+
+      Doc.insert(0, "Hola mundo")    # Create: insert at visible index
+      Doc.append("fin\\n")            # Create: insert at the end
+      Doc.text()                     # Read: the whole document (same on every node)
+      Doc.read(0, 4)                 # Read: 4 chars from index 0 -> "Hola"
+      Doc.replace(5, 5, "gente")     # Update: 5 chars from index 5 become "gente"
+      Doc.delete(4, 6)               # Delete: 6 chars from index 4
+
+  Every call returns `:ok` (or the text) or `{:error, reason}` and changes
+  nothing on error (for example `{:error, :invalid_index}`).
+
+  More:
+
       Doc.status()                   # vc, held ops, peers, counters, tree stats
       Doc.debug()                    # every atom with PosID and tombstones
       Doc.peers()                    # connected nodes
@@ -19,6 +30,15 @@ defmodule Doc do
   """
   defdelegate insert(index, text), to: Doc.Replica
   defdelegate delete(index, count \\ 1), to: Doc.Replica
+  @doc "Update: replace `count` chars from `index` with `text`, in one call (one broadcast)."
+  defdelegate replace(index, count, text), to: Doc.Replica
+
+  @doc "Create at the end of the document."
+  defdelegate append(text), to: Doc.Replica
+
+  @doc "Read `count` chars from `index` (same indices as insert/delete)."
+  defdelegate read(index, count), to: Doc.Replica
+
   defdelegate text(), to: Doc.Replica
   defdelegate status(), to: Doc.Replica
   defdelegate debug(), to: Doc.Replica

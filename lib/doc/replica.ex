@@ -33,6 +33,11 @@ defmodule Doc.Replica do
   def delete(index, count \\ 1),
     do: GenServer.call(Wire.name(), {:local, {:delete, index, count}})
 
+  def replace(index, count, text),
+    do: GenServer.call(Wire.name(), {:local, {:replace, index, count, text}})
+
+  def append(text), do: GenServer.call(Wire.name(), {:local, {:append, text}})
+  def read(index, count), do: GenServer.call(Wire.name(), {:read, index, count})
   def text, do: GenServer.call(Wire.name(), :text)
   def status, do: GenServer.call(Wire.name(), :status)
   def debug, do: GenServer.call(Wire.name(), :debug)
@@ -165,7 +170,54 @@ defmodule Doc.Replica do
     end
   end
 
+  # Update: delete `count` from `index` and insert `text` there, in ONE call. Both
+  # are prepared against the same state (the insert on the document with the
+  # deletes applied), so no remote op can slip in between and shift the index.
+  def handle_call({:local, {:replace, index, count, text}}, _from, s)
+      when is_integer(index) and is_integer(count) and is_binary(text) do
+    with true <- String.valid?(text) || {:error, :invalid_utf8},
+         {:ok, positions} <- Treedoc.prepare_delete(s.doc, index, count),
+         {:ok, me, s} <- author(s),
+         seq0 = Map.get(s.vc, me, 0),
+         dels =
+           positions
+           |> Enum.with_index(seq0 + 1)
+           |> Enum.map(fn {pos, seq} ->
+             %{op: :del, from: me, vc: Map.put(s.vc, me, seq), pos: pos}
+           end),
+         seq1 = seq0 + length(dels),
+         tmp = Enum.reduce(dels, s.doc, &Treedoc.effect(&2, &1)),
+         {:ok, atoms} <- Treedoc.prepare_text(tmp, index, String.graphemes(text), seq1, me) do
+      ins =
+        atoms
+        |> Enum.with_index(seq1 + 1)
+        |> Enum.map(fn {{pos, ch}, seq} ->
+          %{op: :ins, from: me, vc: Map.put(s.vc, me, seq), pos: pos, ch: ch}
+        end)
+
+      local_ops(dels ++ ins, s)
+    else
+      {:error, _} = e -> {:reply, e, s}
+    end
+  end
+
+  # Create at the end of the document as it is right now
+  def handle_call({:local, {:append, text}}, from, s) when is_binary(text),
+    do: handle_call({:local, {:insert, length(Treedoc.visible(s.doc)), text}}, from, s)
+
   def handle_call({:local, _}, _from, s), do: {:reply, {:error, :badarg}, s}
+
+  # Read `count` visible atoms from `index`: same indices as insert/delete
+  def handle_call({:read, index, count}, _from, s)
+      when is_integer(index) and is_integer(count) and index >= 0 and count >= 0 do
+    vis = Treedoc.visible(s.doc)
+
+    if index + count <= length(vis),
+      do: {:reply, vis |> Enum.slice(index, count) |> Enum.map_join(&elem(&1, 1)), s},
+      else: {:reply, {:error, :invalid_index}, s}
+  end
+
+  def handle_call({:read, _, _}, _from, s), do: {:reply, {:error, :invalid_index}, s}
 
   def handle_call(:text, _from, s), do: {:reply, Treedoc.value(s.doc), s}
   def handle_call(:debug, _from, s), do: {:reply, Treedoc.entries(s.doc), s}
