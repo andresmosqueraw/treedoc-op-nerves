@@ -11,6 +11,7 @@
 # All nodes use a RANDOM private cookie and -connect_all false: nothing can join
 # a real class cluster on this network, and the scenarios decide the topology.
 #   TREEDOC_DIR=.. NERVES_DIR=.. CARLA_DIR=.. [CARLA_REF=origin/op-based] scripts/interop_all.sh
+# (newer treedoc-nerves reads its data dir from config first: `log:` sets the file)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 : "${TREEDOC_DIR:?}" "${NERVES_DIR:?}" "${CARLA_DIR:?}"
@@ -48,7 +49,7 @@ for k in 1 2; do
   start "treedoc$k" "$WORK/treedoc" env DISCOVERY=off \
     elixir --name "treedoc$k-$ID@127.0.0.1" --cookie "$COOKIE" -S mix run --no-compile --no-halt
   start "nerves$k" "$WORK/nerves" elixir --name "nerves$k-$ID@127.0.0.1" --cookie "$COOKIE" -S mix run --no-compile --no-halt \
-    -e "$NERVES_BOOT; File.mkdir_p!(\"$WORK/d-nerves$k\"); {:ok, _} = DynamicSupervisor.start_child(Crdt.DynSup, {Crdt.Replica, [data_dir: \"$WORK/d-nerves$k\"]})"
+    -e "$NERVES_BOOT; File.mkdir_p!(\"$WORK/d-nerves$k\"); {:ok, _} = DynamicSupervisor.start_child(Crdt.DynSup, {Crdt.Replica, [data_dir: \"$WORK/d-nerves$k\", log: \"$WORK/d-nerves$k/nerves$k.log\"]})"
   start "carla$k" "$WORK/carla/documento" env CPD_DOC_DATOS="$WORK/d-carla$k" \
     elixir --name "carla$k-$ID@127.0.0.1" --cookie "$COOKIE" -S mix run --no-compile --no-halt
 done
