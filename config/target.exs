@@ -120,4 +120,8 @@ config :opdoc,
   net: Doc.Net.VintageNet,
   scan: System.get_env("OPDOC_SCAN", "on") == "on",
   nodes: System.get_env("OPDOC_NODES", ""),
-  cookie: System.get_env("OPDOC_COOKIE", "cpd2026")
+  cookie: System.get_env("OPDOC_COOKIE", "cpd2026"),
+  # base of the node name, read at BUILD time (the device has no OPDOC_NAME):
+  #   OPDOC_NAME=andres-david ./fw.sh upload <ip>   ->  andres-david-<epoch>@IP
+  # unset or empty: nil, so Doc.Dist falls back to the hostname (nerves-xxxx)
+  name: if(System.get_env("OPDOC_NAME", "") != "", do: System.get_env("OPDOC_NAME"))

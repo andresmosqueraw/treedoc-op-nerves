@@ -49,7 +49,7 @@ ssh <ip>                                           # IEx en la Pi
 
 | Variable / clave | Por defecto | Qué hace |
 |---|---|---|
-| `OPDOC_NAME` / `:name` | hostname | Base del nombre del nodo, que queda `<base>-<época>@IP` |
+| `OPDOC_NAME` / `:name` | hostname | Base del nombre del nodo, que queda `<base>-<época>@IP`. En la Pi se lee al compilar (`OPDOC_NAME=andres-david ./fw.sh upload <ip>`) |
 | `:epoch` | `true` | Época aleatoria guardada junto al log (`<data_dir>/opdoc/epoch`) |
 | `OPDOC_COOKIE` | `cpd2026` | Cookie del curso |
 | `:dist_ports` | `{4218, 4228}` | Puertos de la distribución (contrato). Abrir también el 4369 (epmd) |
