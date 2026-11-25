@@ -1,12 +1,14 @@
 # treedoc-op-nerves: documento distribuido con Treedoc op-based sobre Raspberry Pi (ISIS-4218 CPD, `p_dist`)
 
+**Autores:** Andres Felipe Mosquera Hernandez y David Alejandro Rey Contreras
+
 Editor de texto colaborativo **sin servidor central**. Cada nodo (Raspberry Pi con Nerves, o un computador) guarda la réplica **completa** del documento y se comunica con los demás **solo por broadcast**.
 
 - **CRDT:** Treedoc (Preguiça, Marquès, Shapiro y Leția, ICDCS 2009), **op-based** (CmRDT, Shapiro et al. 2011 §2.4). Cada paso del PosID lleva su desambiguador, y la regla de inserción produce el mismo árbol que Fugue (Weidner y Kleppmann 2023), así que **no intercala** texto concurrente.
 - **Entrega:** causal con relojes vectoriales (CBCAST, Birman 1991) y fiable (reenvío de cada operación y del historial en `nodeup` y `hello`).
 - **Interoperable** con las parejas op-based del curso (`fepecas/treedoc`, `treedoc-nerves`). Habla su contrato (`docs/INTEGRATION.md` de su repositorio), implementado a partir de esa documentación y no de su código. Probado con su código sin modificar: ver [Interoperabilidad](#interoperabilidad).
 
-El plan, con las decisiones, los papers y la tabla de pruebas, está en `../../plan-p_dist.md`. La versión state-based anterior es el repo hermano `../pdoc`; no comparte documento con este.
+Hay una versión state-based anterior en otro repo, `pdoc`; no comparte documento con este.
 
 ## Uso rápido (IEx, o `ssh` a la Pi)
 
@@ -148,8 +150,8 @@ Criterio: el mismo texto en los 6 nodos.
 - **Reenvío del historial completo:** en cada `nodeup` y `hello` se envía todo el historial, que es O(historial) por conexión. Es simple y correcto; en una red grande convendría un intercambio de relojes.
 - **`Bcast` nunca descarta:** en un enlace muy malo, la réplica puede esperar a que se vacíe el buffer TCP. A diferencia de pdoc, aquí perder una operación bloquearía las siguientes de ese nodo hasta el próximo reenvío del historial.
 - **`prevent_overlapping_partitions`:** se desactiva en `rel/vm.args.eex` (release de la Pi). Con `mix run` en el host sigue activo, así que en una partición `global` puede cortar conexiones de más; el descubrimiento las rehace en segundos.
-- **Firmware:** reconstruirlo tras estos cambios (`./fw.sh`). El bug de `nerves_runtime` 0.13.13 en reinicios en caliente bajo QEMU (ver el README de pdoc) aplica igual: en la Pi real se resuelve apagando y encendiendo.
+- **Reinicio en caliente bajo QEMU:** `nerves_runtime` 0.13.13 tiene un bug en ese caso. En la Pi real se resuelve apagando y encendiendo.
 
 ## Referencias
 
-Preguiça et al. 2009 (Treedoc); Leția, Preguiça y Shapiro 2009; Shapiro et al. 2011 (CRDT, Teorema 2.2); Baquero, Almeida y Shoker 2017 (*pure op-based*); Birman, Schiper y Stephenson 1991 (CBCAST); Kleppmann et al. 2019 (intercalado); Weidner y Kleppmann 2023 (Fugue). PDFs en `../../papers` (versión Markdown en `../../papers-md`).
+Preguiça et al. 2009 (Treedoc); Leția, Preguiça y Shapiro 2009; Shapiro et al. 2011 (CRDT, Teorema 2.2); Baquero, Almeida y Shoker 2017 (*pure op-based*); Birman, Schiper y Stephenson 1991 (CBCAST); Kleppmann et al. 2019 (intercalado); Weidner y Kleppmann 2023 (Fugue).
